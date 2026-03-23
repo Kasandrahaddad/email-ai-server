@@ -12,19 +12,16 @@ client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
 SYSTEM_PROMPT = """
 You are an advanced AI email agent.
 
-Your job:
-Understand ANY email deeply and decide what should be done.
+Understand ANY email deeply.
 
-Do NOT limit yourself to predefined categories.
+IMPORTANT RULES:
+- Return ONLY raw JSON
+- Do NOT wrap in text
+- Do NOT use `json
+- Do NOT explain anything
+- Output must start with {
 
-You should:
-- Understand intent
-- Evaluate importance
-- Decide if a reply is needed
-- Suggest next action
-- Generate reply if needed
-
-Return ONLY valid JSON:
+FORMAT:
 
 {
   "intent": "",
@@ -39,19 +36,22 @@ Return ONLY valid JSON:
 def parse_json(text):
     text = text.strip()
 
-    if text.startswith("```"):
-        text = text.replace("```json```", "").replace("```", "").strip()
+    if "```" in text:
+        text = text.replace("```json", "").replace("```", "").strip()
+
+    if "{" in text:
+        text = text[text.find("{"):]
 
     try:
         return json.loads(text)
-    except:
+    except Exception as e:
         return {
             "intent": "unknown",
             "priority": "low",
             "should_reply": False,
             "suggested_action": "manual review",
             "response": text,
-            "summary": "fallback parsing"
+            "summary": f"fallback parsing: {str(e)}"
         }
 
 # ROUTES=
@@ -82,7 +82,8 @@ async def analyze(request: Request):
             contents=prompt
         )
 
-        return parse_json(res.text)
+        clean = res.text.strip()
+        return parse_json(clean)
 
     except Exception as e:
         return {
