@@ -5,47 +5,59 @@ from google import genai
 
 app = FastAPI()
 
+# Gemini Setup
 client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
 
+# SYSTEM PROMPT (Open Agent)
 SYSTEM_PROMPT = """
-You are an AI email agent.
+You are an advanced AI email agent.
 
-Decide the best action for the email.
+Your job:
+Understand ANY email deeply and decide what should be done.
 
-Available actions:
-- send_reply
-- mark_important
-- schedule_meeting
-- extract_task
-- ignore
+Do NOT limit yourself to predefined categories.
 
-Return ONLY JSON:
+You should:
+- Understand intent
+- Evaluate importance
+- Decide if a reply is needed
+- Suggest next action
+- Generate reply if needed
+
+Return ONLY valid JSON:
 
 {
-  "action": "...",
-  "response": "...",
-  "reason": "..."
+  "intent": "",
+  "priority": "low | medium | high",
+  "should_reply": true,
+  "suggested_action": "",
+  "response": "",
+  "summary": ""
 }
 """
-
+# JSON PARSER
 def parse_json(text):
     text = text.strip()
 
     if text.startswith("```"):
-        text = text.split("```")[1]
+        text = text.replace("```json```", "").replace("```", "").strip()
 
     try:
         return json.loads(text)
     except:
         return {
-            "action": "send_reply",
+            "intent": "unknown",
+            "priority": "low",
+            "should_reply": False,
+            "suggested_action": "manual review",
             "response": text,
-            "reason": "fallback"
+            "summary": "fallback parsing"
         }
 
+# ROUTES=
 @app.get("/")
 def home():
-    return {"status": "ok"}
+    return {"message": "AI Email Agent Running"}
 
 @app.post("/analyze")
 async def analyze(request: Request):
@@ -55,33 +67,45 @@ async def analyze(request: Request):
 
         if not email.strip():
             return {
-                "action": "ignore",
+                "intent": "empty",
+                "priority": "low",
+                "should_reply": False,
+                "suggested_action": "ignore",
                 "response": "",
-                "reason": "empty"
+                "summary": "empty email"
             }
 
-        prompt = f"{SYSTEM_PROMPT}\n\nEmail:\n{email}"
+        prompt = f"{SYSTEM_PROMPT}\n\nEMAIL:\n{email}"
 
-        response = client.models.generate_content(
+        res = client.models.generate_content(
             model="gemini-2.5-flash",
             contents=prompt
         )
 
-        return parse_json(response.text)
+        return parse_json(res.text)
 
     except Exception as e:
         return {
-            "action": "error",
+            "intent": "error",
+            "priority": "low",
+            "should_reply": False,
+            "suggested_action": "check system",
             "response": "",
-            "reason": str(e)
+            "summary": str(e)
         }
 
+# OPTIONAL: Reply endpoint
 @app.post("/reply")
 async def reply(request: Request):
     data = await request.json()
     email = data.get("email") or ""
 
-    prompt = f"Write a professional reply:\n\n{email}"
+    prompt = f"""
+Write a professional and helpful email reply.
+
+EMAIL:
+{email}
+"""
 
     res = client.models.generate_content(
         model="gemini-2.5-flash",
@@ -90,34 +114,7 @@ async def reply(request: Request):
 
     return {"reply": res.text}
 
-@app.post("/extract-task")
-async def extract_task(request: Request):
-    data = await request.json()
-    email = data.get("email") or ""
-
-    prompt = f"Extract tasks from this email:\n\n{email}"
-
-    res = client.models.generate_content(
-        model="gemini-2.5-flash",
-        contents=prompt
-    )
-
-    return {"tasks": res.text}
-
-@app.post("/schedule")
-async def schedule(request: Request):
-    data = await request.json()
-    email = data.get("email") or ""
-
-    prompt = f"Does this email request a meeting?\n\n{email}"
-
-    res = client.models.generate_content(
-        model="gemini-2.5-flash",
-        contents=prompt
-    )
-
-    return {"schedule": res.text}
-
+# RUN SERVER
 if __name__ == "__main__":
     import uvicorn
     port = int(os.environ["PORT"])
